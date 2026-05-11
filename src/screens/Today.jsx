@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Plus, CheckSquare, Square } from 'lucide-react';
 import Card from '../components/Common/Card';
 import Badge from '../components/Common/Badge';
@@ -6,8 +6,9 @@ import Button from '../components/Common/Button';
 import Modal from '../components/Common/Modal';
 import ProgressBar from '../components/Common/ProgressBar';
 import PomodoroTimer from '../components/Timer/PomodoroTimer';
-import { today, formatDisplay } from '../lib/dateUtils';
+import { today, formatDisplay, isCDPathDay } from '../lib/dateUtils';
 import { getNextTask, getDeficit, getSRDue } from '../lib/studyUtils';
+import { CD_PATH_BLOCKS, GYM_BLOCKS } from '../lib/constants';
 
 const STATUS_OPTIONS = [
   { key: 'complete', label: 'Complete', icon: '✅', color: '#10B981' },
@@ -31,16 +32,26 @@ export default function Today({
   const deficit = getDeficit(logs, tasks);
   const qbName = settings.question_bank_name || 'eMedici';
 
+  function getDefaultBlocks() {
+    const fallback = isCDPathDay(todayStr) ? CD_PATH_BLOCKS : GYM_BLOCKS;
+    return fallback.map(b => ({ ...b, done: false, note: '' }));
+  }
+
   const [blocks, setBlocks] = useState(() => {
     if (todayLog?.blocks?.length > 0) return todayLog.blocks;
-    return todayBlocks;
+    if (todayBlocks.length > 0) return todayBlocks;
+    return getDefaultBlocks();
   });
+
+  const debounceRef = useRef(null);
 
   useEffect(() => {
     if (todayLog?.blocks?.length > 0) {
       setBlocks(todayLog.blocks);
+    } else if (todayBlocks.length > 0) {
+      setBlocks(todayBlocks);
     } else {
-      setBlocks(todayBlocks.length > 0 ? todayBlocks : []);
+      setBlocks(getDefaultBlocks());
     }
   }, [todayLog?.date, todayBlocks.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -103,28 +114,29 @@ export default function Today({
     setLogModal(false);
   }
 
-  async function handleBlockToggle(idx) {
-    const updated = blocks.map((b, i) => i === idx ? { ...b, done: !b.done } : b);
-    setBlocks(updated);
-    const taskNum = todayLog?.task_num ?? (task?.sort_order || 1);
-    const taskId = todayLog?.task_id || task?.id;
-    if (todayLog) {
-      await updateBlocks(todayStr, updated);
-    } else {
-      await upsertLog({ date: todayStr, status: 'pending', task_num: taskNum, task_id: taskId, blocks: updated, e_medici: 0 });
-    }
+  function saveBlocksDebounced(updated) {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(async () => {
+      const taskNum = todayLog?.task_num ?? (task?.sort_order || 1);
+      const taskId = todayLog?.task_id || task?.id;
+      if (todayLog) {
+        await updateBlocks(todayStr, updated);
+      } else {
+        await upsertLog({ date: todayStr, status: 'pending', task_num: taskNum, task_id: taskId, blocks: updated, e_medici: 0 });
+      }
+    }, 1000);
   }
 
-  async function handleBlockNote(idx, note) {
+  function handleBlockToggle(idx) {
+    const updated = blocks.map((b, i) => i === idx ? { ...b, done: !b.done } : b);
+    setBlocks(updated);
+    saveBlocksDebounced(updated);
+  }
+
+  function handleBlockNote(idx, note) {
     const updated = blocks.map((b, i) => i === idx ? { ...b, note } : b);
     setBlocks(updated);
-    const taskNum = todayLog?.task_num ?? (task?.sort_order || 1);
-    const taskId = todayLog?.task_id || task?.id;
-    if (todayLog) {
-      await updateBlocks(todayStr, updated);
-    } else {
-      await upsertLog({ date: todayStr, status: 'pending', task_num: taskNum, task_id: taskId, blocks: updated, e_medici: 0 });
-    }
+    saveBlocksDebounced(updated);
   }
 
   function addBlock() {

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Plus, Trash2, ChevronUp, ChevronDown, Save, Download, Upload, AlertTriangle } from 'lucide-react';
+import { Plus, Trash2, ChevronUp, ChevronDown, Save, Download, Upload, AlertTriangle, RefreshCw } from 'lucide-react';
 import Card from '../components/Common/Card';
 import Badge from '../components/Common/Badge';
 import Button from '../components/Common/Button';
@@ -9,7 +9,9 @@ import { useSubjects } from '../hooks/useSubjects';
 import { useTasks } from '../hooks/useTasks';
 import { usePhases } from '../hooks/usePhases';
 import { useScheduleTemplates } from '../hooks/useScheduleTemplates';
+import { useAuth } from '../hooks/useAuth';
 import { daysUntilExam } from '../lib/dateUtils';
+import { forceReseed } from '../lib/seedUserData';
 
 const TABS = ['Exam Setup', 'Subjects', 'Tasks', 'SR Settings', 'Schedule', 'Phases', 'Import/Export'];
 
@@ -623,10 +625,12 @@ function PhasesTab({ phases, tasks, addPhase, updatePhase, deletePhase, reorderP
 }
 
 // ── Tab: Import/Export ───────────────────────────────────────────────────────
-function ImportExportTab({ settings, subjects, phases, tasks, templates }) {
-  const [importing, setImporting] = useState(false);
+function ImportExportTab({ settings, subjects, phases, tasks, templates, user }) {
   const [importText, setImportText] = useState('');
   const [importError, setImportError] = useState('');
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetDone, setResetDone] = useState(false);
 
   function handleExport() {
     const data = { settings, subjects, phases, tasks, templates, exported_at: new Date().toISOString() };
@@ -644,6 +648,16 @@ function ImportExportTab({ settings, subjects, phases, tasks, templates }) {
     } catch {
       setImportError('Invalid JSON. Please paste valid exported plan data.');
     }
+  }
+
+  async function handleReset() {
+    if (!user?.id) return;
+    setResetting(true);
+    await forceReseed(user.id);
+    setResetting(false);
+    setResetConfirm(false);
+    setResetDone(true);
+    setTimeout(() => setResetDone(false), 4000);
   }
 
   return (
@@ -667,6 +681,38 @@ function ImportExportTab({ settings, subjects, phases, tasks, templates }) {
         </div>
         <Button variant="secondary" onClick={handleImportPreview} disabled><Upload size={14} /> Validate &amp; Import</Button>
       </Card>
+
+      <Card className="p-5 border-[#FECACA]">
+        <h3 className="font-serif text-lg text-[#0F172A] mb-2">Reset to Default Data</h3>
+        <p className="font-sans text-sm text-[#64748B] mb-4">
+          Wipes all your study data (logs, SR records, tasks, subjects, schedule) and re-seeds the default AMC plan. Use this if your data is corrupted or you want a fresh start.
+        </p>
+        {resetDone && (
+          <div className="bg-[#ECFDF5] border border-[#A7F3D0] rounded-[10px] p-3 mb-4">
+            <p className="font-sans text-sm text-[#065F46]">Reset complete. Reload the page to see fresh data.</p>
+          </div>
+        )}
+        {!resetConfirm ? (
+          <Button variant="danger" onClick={() => setResetConfirm(true)}>
+            <RefreshCw size={14} /> Reset to Default Data
+          </Button>
+        ) : (
+          <div className="bg-[#FEF2F2] border border-[#FECACA] rounded-[10px] p-4 flex flex-col gap-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle size={16} className="text-[#EF4444] mt-0.5 flex-shrink-0" />
+              <p className="font-sans text-sm text-[#DC2626]">
+                This will permanently delete ALL your study logs, SR records, tasks, subjects, and schedule data. This cannot be undone.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <Button variant="danger" onClick={handleReset} disabled={resetting}>
+                {resetting ? 'Resetting…' : 'Yes, Reset Everything'}
+              </Button>
+              <Button variant="secondary" onClick={() => setResetConfirm(false)}>Cancel</Button>
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }
@@ -674,6 +720,7 @@ function ImportExportTab({ settings, subjects, phases, tasks, templates }) {
 // ── Main Settings screen ─────────────────────────────────────────────────────
 export default function Settings() {
   const [activeTab, setActiveTab] = useState(0);
+  const { user } = useAuth();
   const { settings, updateSettings } = useUserSettings();
   const { subjects, addSubject, updateSubject, deleteSubject, reorderSubject } = useSubjects();
   const { tasks, addTask, updateTask, deleteTask, reorderTask } = useTasks();
@@ -687,7 +734,7 @@ export default function Settings() {
     <SRSettingsTab settings={settings} updateSettings={updateSettings} />,
     <ScheduleTab templates={templates} assignments={assignments} createTemplate={createTemplate} updateTemplate={updateTemplate} deleteTemplate={deleteTemplate} assignTemplate={assignTemplate} />,
     <PhasesTab phases={phases} tasks={tasks} addPhase={addPhase} updatePhase={updatePhase} deletePhase={deletePhase} reorderPhase={reorderPhase} />,
-    <ImportExportTab settings={settings} subjects={subjects} phases={phases} tasks={tasks} templates={templates} />,
+    <ImportExportTab settings={settings} subjects={subjects} phases={phases} tasks={tasks} templates={templates} user={user} />,
   ];
 
   return (

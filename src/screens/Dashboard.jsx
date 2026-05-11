@@ -52,13 +52,7 @@ export default function Dashboard({
   });
 
   const completedTasks = logs.filter(l => l.status === 'complete').length;
-  const completedTaskIds = new Set(
-    logs.filter(l => l.status === 'complete').map(l => l.task_id || String(l.task_num))
-  );
-  const completedSubjects = subjects.filter(s => {
-    const mid = s.milestone_task_id;
-    return mid && (completedTaskIds.has(mid) || completedTaskIds.has(String(mid)));
-  }).length;
+  const completedSubjects = srRecords.filter(r => r.completed_date).length;
 
   const examDate = settings.exam_date || '2026-08-17';
   const examName = settings.exam_name || 'AMC MCQ';

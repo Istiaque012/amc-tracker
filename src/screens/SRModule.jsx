@@ -4,47 +4,73 @@ import SRSubjectCard from '../components/SR/SRSubjectCard';
 import SRModal from '../components/SR/SRModal';
 import SRDonut from '../components/Charts/SRDonut';
 import { getSRDue } from '../lib/studyUtils';
-import { formatShort } from '../lib/dateUtils';
-import { format, addDays, parseISO } from 'date-fns';
+import { formatShort, today } from '../lib/dateUtils';
+import { format, addDays } from 'date-fns';
+import { SUBJECTS as FALLBACK_SUBJECTS } from '../lib/constants';
+
+function RetentionHeatmap({ srRecords }) {
+  const todayStr = today();
+
+  function getRetention(rec) {
+    if (!rec.completed_date) return 0;
+    let lastHitDate = rec.completed_date;
+    let stability = 1;
+    if (rec.sr3_done && rec.sr3_due) { lastHitDate = rec.sr3_due; stability = 6; }
+    else if (rec.sr2_done && rec.sr2_due) { lastHitDate = rec.sr2_due; stability = 3.5; }
+    else if (rec.sr1_done && rec.sr1_due) { lastHitDate = rec.sr1_due; stability = 2; }
+    const t = Math.max(0, Math.round((new Date(todayStr) - new Date(lastHitDate)) / 86400000));
+    return Math.round(100 * Math.exp(-t / (stability * 14)));
+  }
+
+  function getColor(pct) {
+    if (pct >= 70) return '#10B981';
+    if (pct >= 40) return '#F59E0B';
+    return '#EF4444';
+  }
+
+  const subjects = FALLBACK_SUBJECTS.map(s => {
+    const rec = srRecords.find(r => r.subject_name === s.name);
+    if (!rec) return { name: s.name, pct: null };
+    return { name: s.name, pct: getRetention(rec) };
+  });
+
+  return (
+    <div>
+      <div className="grid grid-cols-6 gap-1.5 mb-2">
+        {subjects.map(s => (
+          <div
+            key={s.name}
+            title={`${s.name}: ${s.pct !== null ? s.pct + '%' : 'not started'}`}
+            className="aspect-square rounded-[4px]"
+            style={{ backgroundColor: s.pct !== null ? getColor(s.pct) : '#E2E8F0' }}
+          />
+        ))}
+      </div>
+      <div className="flex items-center gap-3 mt-1">
+        {[['#10B981', '≥70%'], ['#F59E0B', '40–70%'], ['#EF4444', '<40%'], ['#E2E8F0', 'Not started']].map(([color, label]) => (
+          <div key={label} className="flex items-center gap-1">
+            <div className="w-2.5 h-2.5 rounded-[2px]" style={{ backgroundColor: color }} />
+            <span className="font-sans text-xs text-[#94A3B8]">{label}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function SRModule({ logs, srRecords, completeSRHit, createSRRecord, subjects = [], settings = {} }) {
   const [srModal, setSrModal] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const completedTaskIds = new Set(
-    logs.filter(l => l.status === 'complete').map(l => l.task_id || String(l.task_num))
-  );
   const srDue = getSRDue(srRecords, settings);
   const sr1Interval = settings.sr1_interval || 7;
-
-  const completedSubjects = subjects.filter(s => {
-    const mid = s.milestone_task_id;
-    return mid && (completedTaskIds.has(mid) || completedTaskIds.has(String(mid)));
-  });
-
-  const enrichedRecords = completedSubjects.map(subject => {
-    const existing = srRecords.find(r => r.subject_name === subject.name);
-    if (existing) return existing;
-    // Subject completed but no SR record yet — synthesize
-    const mid = subject.milestone_task_id;
-    const log = logs.find(l =>
-      (l.task_id === mid || String(l.task_num) === String(mid)) && l.status === 'complete'
-    );
-    if (!log) return null;
-    return {
-      subject_name: subject.name,
-      completed_date: log.date,
-      sr1_due: format(addDays(parseISO(log.date), sr1Interval), 'yyyy-MM-dd'),
-      sr1_done: false,
-      sr2_due: null, sr2_done: false,
-      sr3_due: null, sr3_done: false,
-    };
-  }).filter(Boolean);
-
-  // Upcoming SRs in next 7 days
-  const todayStr = new Date().toISOString().slice(0, 10);
+  const todayStr = today();
   const in7 = format(addDays(new Date(), 7), 'yyyy-MM-dd');
-  const upcoming = enrichedRecords.flatMap(rec =>
+
+  // Render directly from sr_records — no subjects table dependency
+  const activeRecords = srRecords.filter(r => r.completed_date);
+
+  const upcoming = srRecords.flatMap(rec =>
     ['sr1', 'sr2', 'sr3'].flatMap(hit => {
       const due = rec[`${hit}_due`];
       const done = rec[`${hit}_done`];
@@ -53,40 +79,64 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
     })
   ).sort((a, b) => a.due.localeCompare(b.due));
 
+  const dueOrOverdue = srDue.length > 0;
+
   async function handleSR(rating) {
     if (!srModal) return;
     setSaving(true);
-    const existing = srRecords.find(r => r.subject_name === srModal.subjectName);
-    if (!existing) {
-      const subject = subjects.find(s => s.name === srModal.subjectName);
-      const mid = subject?.milestone_task_id;
-      const log = logs.find(l =>
-        (l.task_id === mid || String(l.task_num) === String(mid)) && l.status === 'complete'
-      );
-      if (log) {
-        await createSRRecord({
-          subject_name: srModal.subjectName,
-          completed_date: log.date,
-          sr1_due: format(addDays(parseISO(log.date), sr1Interval), 'yyyy-MM-dd'),
-        });
-      }
-    }
     await completeSRHit(srModal.subjectName, srModal.hit, rating);
     setSaving(false);
     setSrModal(null);
   }
+
+  // SR compliance %
+  let totalSlots = 0, doneSlots = 0;
+  srRecords.forEach(rec => {
+    ['sr1', 'sr2', 'sr3'].forEach(hit => {
+      if (rec[`${hit}_due`]) {
+        totalSlots++;
+        if (rec[`${hit}_done`]) doneSlots++;
+      }
+    });
+  });
+  const compliancePct = totalSlots > 0 ? Math.round((doneSlots / totalSlots) * 100) : 0;
 
   return (
     <div className="p-8">
       <div className="mb-6">
         <h1 className="font-serif text-3xl text-[#0F172A] mb-1">Spaced Repetition</h1>
         <p className="font-sans text-[#64748B] text-sm">
-          {completedSubjects.length} subjects completed · {srDue.length} due today
+          {activeRecords.length} subjects in SR · {srDue.length} due today
         </p>
       </div>
 
+      {/* Alert banner */}
+      {dueOrOverdue && (
+        <div className="flex items-center justify-between bg-[#FFFBEB] border border-[#FDE68A] rounded-[12px] px-5 py-4 mb-6">
+          <div>
+            <p className="font-sans text-sm font-bold text-[#B45309]">
+              {srDue.filter(s => s.overdue).length > 0
+                ? `${srDue.filter(s => s.overdue).length} overdue + ${srDue.filter(s => !s.overdue).length} due today`
+                : `${srDue.length} SR review${srDue.length > 1 ? 's' : ''} due today`}
+            </p>
+            <p className="font-sans text-xs text-[#92400E] mt-0.5">
+              {srDue.map(s => `${s.subject_name} (${s.label})`).join(' · ')}
+            </p>
+          </div>
+          <button
+            onClick={() => {
+              const first = srDue[0];
+              if (first) setSrModal({ subjectName: first.subject_name, hit: first.hit, hitLabel: first.label });
+            }}
+            className="font-sans text-sm font-bold text-[#B45309] border border-[#FDE68A] hover:bg-[#FEF3C7] px-4 py-2 rounded-[8px] cursor-pointer transition-all flex-shrink-0 ml-4"
+          >
+            Start Review →
+          </button>
+        </div>
+      )}
+
       <div className="grid gap-6" style={{ gridTemplateColumns: '2fr 1fr' }}>
-        {/* Left */}
+        {/* Left — subject cards */}
         <div className="flex flex-col gap-4">
           {/* Protocol card */}
           <Card className="p-4 bg-[#EFF6FF] border-[#BFDBFE]">
@@ -105,12 +155,12 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
             </div>
           </Card>
 
-          {enrichedRecords.length === 0 ? (
+          {activeRecords.length === 0 ? (
             <div className="flex items-center justify-center h-40 text-[#94A3B8] font-sans text-sm">
               Complete your first milestone task to start SR tracking
             </div>
           ) : (
-            enrichedRecords.map(rec => (
+            activeRecords.map(rec => (
               <SRSubjectCard
                 key={rec.subject_name}
                 rec={rec}
@@ -120,14 +170,15 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
           )}
         </div>
 
-        {/* Right — sticky */}
+        {/* Right — sticky sidebar */}
         <div className="flex flex-col gap-4 sticky top-6 self-start">
           <Card className="p-4">
-            <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-2">SR Compliance</h3>
-            <SRDonut srRecords={enrichedRecords} />
+            <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-1">SR Compliance</h3>
+            <div className="font-mono text-3xl font-bold text-[#0F2744] mb-3">{compliancePct}%</div>
+            <SRDonut srRecords={srRecords} />
           </Card>
 
-          {/* Today's queue */}
+          {/* Due today list */}
           {srDue.length > 0 && (
             <Card className="p-4">
               <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-3">Due Today</h3>
@@ -151,6 +202,12 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
               </div>
             </Card>
           )}
+
+          {/* Retention heatmap */}
+          <Card className="p-4">
+            <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-3">Retention Heatmap</h3>
+            <RetentionHeatmap srRecords={srRecords} />
+          </Card>
 
           {/* Upcoming */}
           {upcoming.length > 0 && (

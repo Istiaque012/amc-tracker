@@ -19,15 +19,16 @@ import { useScheduleTemplates } from './hooks/useScheduleTemplates';
 import { useQuestionLogs } from './hooks/useQuestionLogs';
 import { useMistakeLogs } from './hooks/useMistakeLogs';
 import { useMockExams } from './hooks/useMockExams';
+import { ensureUserSetup } from './lib/seedUserData';
 import { format, addDays, parseISO } from 'date-fns';
 
 function AppInner() {
   const { user, loading: authLoading, signOut } = useAuth();
   const {
-    logs, loading: logsLoading, upsertLog, deleteLog, updateBlocks, seedInitialData,
+    logs, loading: logsLoading, upsertLog, deleteLog, updateBlocks,
   } = useStudyLog();
   const {
-    srRecords, loading: srLoading, createSRRecord, completeSRHit, seedInitialSRData,
+    srRecords, loading: srLoading, createSRRecord, completeSRHit,
   } = useSRRecords();
   const { settings, loading: settingsLoading } = useUserSettings();
   const { subjects, loading: subjectsLoading } = useSubjects();
@@ -40,8 +41,7 @@ function AppInner() {
   // Seed only once when user first logs in
   useEffect(() => {
     if (user) {
-      seedInitialData();
-      seedInitialSRData();
+      ensureUserSetup(user.id);
     }
   }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 

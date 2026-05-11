@@ -1,15 +1,18 @@
 import { useState, useMemo } from 'react';
-import { Search, Pencil, Trash2 } from 'lucide-react';
+import { Search, Pencil, Trash2, Info } from 'lucide-react';
 import Card from '../components/Common/Card';
 import Badge from '../components/Common/Badge';
 import Button from '../components/Common/Button';
 import Modal from '../components/Common/Modal';
 import { getProjectedDates } from '../lib/studyUtils';
 import { formatShort } from '../lib/dateUtils';
+import { TASKS as FALLBACK_TASKS } from '../lib/constants';
 
 const FILTERS = ['All', 'Done', 'Upcoming', 'Phase 1', 'Phase 2', 'Phase 3'];
 
-export default function Plan({ logs, upsertLog, deleteLog, tasks = [], settings = {} }) {
+export default function Plan({ logs, upsertLog, deleteLog, tasks: rawTasks = [], settings = {} }) {
+  const usingFallback = rawTasks.length === 0;
+  const tasks = usingFallback ? FALLBACK_TASKS : rawTasks;
   const [filter, setFilter] = useState('All');
   const [search, setSearch] = useState('');
   const [editModal, setEditModal] = useState(null);
@@ -92,6 +95,15 @@ export default function Plan({ logs, upsertLog, deleteLog, tasks = [], settings 
         <h1 className="font-serif text-3xl text-[#0F172A] mb-1">Study Plan</h1>
         <p className="font-sans text-[#64748B] text-sm">{tasks.length || 77} tasks across 3 phases</p>
       </div>
+
+      {usingFallback && (
+        <div className="flex items-center gap-3 bg-[#FFFBEB] border border-[#FDE68A] rounded-[10px] px-4 py-3 mb-6">
+          <Info size={16} className="text-[#B45309] flex-shrink-0" />
+          <p className="font-sans text-sm text-[#B45309]">
+            Using default task list. Go to Settings to customise your subjects and tasks.
+          </p>
+        </div>
+      )}
 
       {/* Filter bar */}
       <div className="flex items-center gap-3 mb-6 flex-wrap">

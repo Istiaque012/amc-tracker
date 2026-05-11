@@ -13,7 +13,11 @@ export function useScheduleTemplates() {
     if (!user) { setTemplates([]); setAssignments([]); setLoading(false); return; }
     setLoading(true);
     const [{ data: tpls }, { data: asgn }] = await Promise.all([
-      supabase.from('schedule_templates').select('*').eq('user_id', user.id).order('created_at'),
+      supabase
+        .from('schedule_templates')
+        .select('*, schedule_blocks(id, label, start_time, end_time, sort_order)')
+        .eq('user_id', user.id)
+        .order('created_at'),
       supabase.from('schedule_template_assignments').select('*').eq('user_id', user.id),
     ]);
     if (tpls) setTemplates(tpls);
@@ -35,12 +39,15 @@ export function useScheduleTemplates() {
 
   function getTodayBlocks() {
     const tpl = getTodayTemplate();
-    if (!tpl || !tpl.blocks) return [];
-    return tpl.blocks.map(b => ({
+    if (!tpl) return [];
+    const blocks = (tpl.schedule_blocks || [])
+      .slice()
+      .sort((a, b) => a.sort_order - b.sort_order);
+    return blocks.map(b => ({
       label: b.label,
-      time: `${b.start}–${b.end}`,
-      start: b.start,
-      end: b.end,
+      time: `${b.start_time}–${b.end_time}`,
+      start: b.start_time,
+      end: b.end_time,
       done: false,
       note: '',
     }));
