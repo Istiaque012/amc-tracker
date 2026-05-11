@@ -1,0 +1,96 @@
+@import url('https://fonts.googleapis.com/css2?family=Crimson+Pro:wght@400;500;600;700&family=Nunito:wght@400;500;600;700;800&family=DM+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #F8FAFC;
+  --surface: #FFFFFF;
+  --surface2: #F1F5F9;
+  --border: #E2E8F0;
+  --border2: #CBD5E1;
+
+  --navy: #0F2744;
+  --navy2: #1D4ED8;
+  --blue: #3B82F6;
+  --blue-l: #EFF6FF;
+  --blue-b: #BFDBFE;
+
+  --green: #10B981;
+  --green-l: #ECFDF5;
+  --green-b: #A7F3D0;
+
+  --amber: #F59E0B;
+  --amber-l: #FFFBEB;
+  --amber-b: #FDE68A;
+
+  --red: #EF4444;
+  --red-l: #FEF2F2;
+  --red-b: #FECACA;
+
+  --purple: #8B5CF6;
+  --purple-l: #F5F3FF;
+
+  --t1: #0F172A;
+  --t2: #334155;
+  --t3: #64748B;
+  --t4: #94A3B8;
+
+  --shadow: 0 1px 3px rgba(0,0,0,.08), 0 1px 2px rgba(0,0,0,.05);
+  --shadow-md: 0 4px 16px rgba(0,0,0,.08);
+  --radius: 14px;
+  --radius-sm: 10px;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html, body {
+  font-family: 'Nunito', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--t1);
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  padding: 0;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Crimson Pro', Georgia, serif;
+}
+
+.font-serif {
+  font-family: 'Crimson Pro', Georgia, serif !important;
+}
+.font-sans {
+  font-family: 'Nunito', system-ui, sans-serif !important;
+}
+.font-mono {
+  font-family: 'DM Mono', monospace !important;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #CBD5E1;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94A3B8;
+}
+
+/* Pulse animation for overdue SR */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(239,68,68,.4); }
+  70% { box-shadow: 0 0 0 8px rgba(239,68,68,0); }
+  100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+}
+.pulse-red {
+  animation: pulse-ring 1.5s infinite;
+}
