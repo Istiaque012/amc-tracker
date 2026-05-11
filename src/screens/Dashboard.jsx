@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom';
-import { Flame, BookOpen, CheckCircle, Zap, TrendingDown, Clock } from 'lucide-react';
+import { Flame, BookOpen, CheckCircle, Zap, TrendingDown, Clock, Lightbulb } from 'lucide-react';
 import Card from '../components/Common/Card';
 import Badge from '../components/Common/Badge';
 import Button from '../components/Common/Button';
@@ -7,8 +7,10 @@ import ProgressBar from '../components/Common/ProgressBar';
 import ReadinessGauge from '../components/Charts/ReadinessGauge';
 import PhaseRings from '../components/Charts/PhaseRings';
 import { formatDisplay, today, daysUntilExam } from '../lib/dateUtils';
-import { getNextTaskNum, getDeficit, getStreak, getTotalEMedici, getReadiness, getPhaseProgress, getSRDue } from '../lib/studyUtils';
-import { TASKS, SUBJECTS, EXAM_DATE } from '../lib/constants';
+import {
+  getNextTask, getDeficit, getStreak, getTotalEMedici,
+  getReadiness, getPhaseProgress, getSRDue, getDailyRecommendation,
+} from '../lib/studyUtils';
 
 function MetricCard({ label, value, sub, color = '#3B82F6', icon: Icon, bg }) {
   return (
@@ -29,50 +31,95 @@ function MetricCard({ label, value, sub, color = '#3B82F6', icon: Icon, bg }) {
   );
 }
 
-export default function Dashboard({ logs, srRecords }) {
+export default function Dashboard({
+  logs, srRecords,
+  tasks = [], subjects = [], settings = {},
+  questionLogs = [], mockExams = [],
+}) {
   const navigate = useNavigate();
-  const nextTask = getNextTaskNum(logs);
-  const todayTask = TASKS.find(t => t.id === nextTask);
-  const deficit = getDeficit(logs);
-  const streak = getStreak(logs);
-  const totalE = getTotalEMedici(logs);
-  const readiness = getReadiness(logs, srRecords);
-  const phases = getPhaseProgress(logs);
-  const srDue = getSRDue(srRecords);
-  const completedTasks = logs.filter(l => l.status === 'complete').length;
-  const completedSubjects = SUBJECTS.filter(s =>
-    logs.some(l => l.status === 'complete' && l.task_num === s.milestoneTaskId)
-  ).length;
-  const daysLeft = daysUntilExam(EXAM_DATE);
-
   const todayStr = today();
   const todayLog = logs.find(l => l.date === todayStr);
+
+  const nextTask = getNextTask(logs, tasks);
+  const deficit = getDeficit(logs, tasks);
+  const streak = getStreak(logs);
+  const totalE = getTotalEMedici(logs);
+  const readiness = getReadiness(logs, srRecords, tasks, questionLogs, mockExams);
+  const phases = getPhaseProgress(logs, tasks);
+  const srDue = getSRDue(srRecords, settings);
+  const recommendation = getDailyRecommendation({
+    logs, tasks, srRecords, userSettings: settings, questionLogs, mistakeLogs: [],
+  });
+
+  const completedTasks = logs.filter(l => l.status === 'complete').length;
+  const completedTaskIds = new Set(
+    logs.filter(l => l.status === 'complete').map(l => l.task_id || String(l.task_num))
+  );
+  const completedSubjects = subjects.filter(s => {
+    const mid = s.milestone_task_id;
+    return mid && (completedTaskIds.has(mid) || completedTaskIds.has(String(mid)));
+  }).length;
+
+  const examDate = settings.exam_date || '2026-08-17';
+  const examName = settings.exam_name || 'AMC MCQ';
+  const qbName = settings.question_bank_name || 'eMedici';
+  const daysLeft = daysUntilExam(examDate);
+  const examDateDisplay = examDate
+    ? new Date(examDate + 'T00:00:00').toLocaleDateString('en-AU', { day: 'numeric', month: 'long', year: 'numeric' })
+    : '';
 
   return (
     <div className="p-8">
       {/* Header */}
       <div className="mb-8">
         <h1 className="font-serif text-4xl text-[#0F172A] mb-1">{formatDisplay(new Date())}</h1>
-        <p className="font-sans text-[#64748B]">AMC MCQ Exam · August 17, 2026</p>
+        <p className="font-sans text-[#64748B]">{examName} Exam · {examDateDisplay}</p>
       </div>
 
       <div className="grid grid-cols-3 gap-6">
         {/* Left column */}
         <div className="col-span-2 flex flex-col gap-6">
+
+          {/* Daily Recommendation */}
+          <Card className="p-5 bg-[#EFF6FF] border-[#BFDBFE]">
+            <div className="flex items-center gap-2 mb-3">
+              <Lightbulb size={16} className="text-[#1D4ED8]" />
+              <span className="font-sans text-xs font-bold uppercase tracking-wider text-[#1D4ED8]">Today's Recommendation</span>
+            </div>
+            <p className="font-sans text-sm text-[#334155] mb-3">{recommendation.message}</p>
+            <div className="flex items-center gap-3 flex-wrap">
+              {recommendation.srDue.length > 0 && (
+                <Badge variant="amber">{recommendation.srLabel}</Badge>
+              )}
+              <span className="font-sans text-xs text-[#64748B]">
+                Questions: {recommendation.todayQDone}/{recommendation.questionTarget} today
+              </span>
+              {recommendation.warnings.map((w, i) => (
+                <span key={i} className="font-sans text-xs text-[#EF4444]">⚠ {w}</span>
+              ))}
+            </div>
+          </Card>
+
           {/* Today's task */}
           <Card className="p-5">
             <div className="flex items-center justify-between mb-3">
               <span className="font-sans text-xs font-bold uppercase tracking-wider text-[#64748B]">Today's Task</span>
-              {todayTask && <Badge variant={todayTask.phase === 1 ? 'blue' : todayTask.phase === 2 ? 'purple' : 'green'}>Phase {todayTask.phase}</Badge>}
+              {nextTask && (
+                <Badge variant={nextTask.phase === 1 ? 'blue' : nextTask.phase === 2 ? 'purple' : 'green'}>
+                  Phase {nextTask.phase}
+                </Badge>
+              )}
             </div>
-            {todayTask ? (
+            {nextTask ? (
               <div>
                 <div className="flex items-center gap-2 mb-2">
-                  <span className="font-mono text-xs text-[#94A3B8]">#{todayTask.id}</span>
-                  {todayTask.isMilestone && <Badge variant="amber">Milestone</Badge>}
+                  <span className="font-mono text-xs text-[#94A3B8]">#{nextTask.sort_order || nextTask.id}</span>
+                  {(nextTask.is_milestone || nextTask.isMilestone) && <Badge variant="amber">Milestone</Badge>}
                 </div>
-                <p className="font-serif text-xl text-[#0F172A] mb-1">{todayTask.title}</p>
-                <p className="font-sans text-sm text-[#64748B]">{todayTask.subject} · Target {todayTask.eQty} eMedici</p>
+                <p className="font-serif text-xl text-[#0F172A] mb-1">{nextTask.title}</p>
+                <p className="font-sans text-sm text-[#64748B]">
+                  {nextTask.subject} · Target {nextTask.emedici_qty || nextTask.eQty} {qbName}
+                </p>
                 <div className="mt-4">
                   {todayLog ? (
                     <div className="flex items-center gap-3">
@@ -87,7 +134,7 @@ export default function Dashboard({ logs, srRecords }) {
                 </div>
               </div>
             ) : (
-              <p className="font-sans text-[#64748B]">All 77 tasks complete!</p>
+              <p className="font-sans text-[#64748B]">All {tasks.length || 77} tasks complete!</p>
             )}
           </Card>
 
@@ -96,10 +143,12 @@ export default function Dashboard({ logs, srRecords }) {
             <div className="flex flex-col gap-2">
               <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-[#64748B]">Spaced Repetition Due</h3>
               {srDue.slice(0, 4).map(sr => (
-                <div key={`${sr.subject_name}-${sr.hit}`}
+                <div
+                  key={`${sr.subject_name}-${sr.hit}`}
                   className={`flex items-center justify-between px-4 py-3 rounded-[10px] border ${
                     sr.overdue ? 'bg-[#FEF2F2] border-[#FECACA]' : 'bg-[#FFFBEB] border-[#FDE68A]'
-                  }`}>
+                  }`}
+                >
                   <div className="flex items-center gap-3">
                     <Badge variant={sr.overdue ? 'red' : 'amber'}>{sr.label}</Badge>
                     <span className="font-sans text-sm font-semibold text-[#0F172A]">{sr.subject_name}</span>
@@ -115,8 +164,14 @@ export default function Dashboard({ logs, srRecords }) {
 
           {/* Metrics */}
           <div className="grid grid-cols-3 gap-4">
-            <MetricCard label="Tasks Done" value={`${completedTasks}/77`} color="#3B82F6" icon={BookOpen} bg="#EFF6FF" />
-            <MetricCard label="Subjects" value={`${completedSubjects}/18`} color="#10B981" icon={CheckCircle} bg="#ECFDF5" />
+            <MetricCard
+              label="Tasks Done" value={`${completedTasks}/${tasks.length || 77}`}
+              color="#3B82F6" icon={BookOpen} bg="#EFF6FF"
+            />
+            <MetricCard
+              label="Subjects" value={`${completedSubjects}/${subjects.length || 18}`}
+              color="#10B981" icon={CheckCircle} bg="#ECFDF5"
+            />
             <MetricCard
               label="Streak"
               value={streak === 0 ? '0' : `${streak} 🔥`}
@@ -124,22 +179,23 @@ export default function Dashboard({ logs, srRecords }) {
               icon={Flame} bg="#FFFBEB"
               sub={streak > 0 ? 'days' : 'No active streak'}
             />
-            <MetricCard label="eMedici Done" value={totalE} color="#8B5CF6" icon={Zap} bg="#F5F3FF" sub="questions total" />
             <MetricCard
-              label="eMedici Deficit"
-              value={deficit}
+              label={`${qbName} Done`} value={totalE}
+              color="#8B5CF6" icon={Zap} bg="#F5F3FF" sub="questions total"
+            />
+            <MetricCard
+              label="Question Deficit" value={deficit}
               color={deficit > 20 ? '#EF4444' : deficit > 0 ? '#F59E0B' : '#10B981'}
               icon={TrendingDown}
               bg={deficit > 20 ? '#FEF2F2' : deficit > 0 ? '#FFFBEB' : '#ECFDF5'}
               sub={deficit === 0 ? 'On track!' : 'questions behind'}
             />
             <MetricCard
-              label="Days to Exam"
-              value={daysLeft}
+              label="Days to Exam" value={daysLeft}
               color={daysLeft < 30 ? '#EF4444' : '#0F2744'}
               icon={Clock}
               bg={daysLeft < 30 ? '#FEF2F2' : '#EFF6FF'}
-              sub="Aug 17, 2026"
+              sub={examDateDisplay}
             />
           </div>
 
@@ -149,8 +205,8 @@ export default function Dashboard({ logs, srRecords }) {
             <div className="flex flex-col gap-3">
               {[
                 { label: 'Phase 1 — Foundation', data: phases.phase1, color: '#3B82F6' },
-                { label: 'Phase 2 — Recall', data: phases.phase2, color: '#8B5CF6' },
-                { label: 'Phase 3 — Final', data: phases.phase3, color: '#10B981' },
+                { label: 'Phase 2 — Recall',     data: phases.phase2, color: '#8B5CF6' },
+                { label: 'Phase 3 — Final',       data: phases.phase3, color: '#10B981' },
               ].map(p => (
                 <div key={p.label}>
                   <div className="flex justify-between mb-1.5">
@@ -167,7 +223,10 @@ export default function Dashboard({ logs, srRecords }) {
         {/* Right column */}
         <div className="flex flex-col gap-5">
           <Card className="p-5">
-            <ReadinessGauge value={readiness} />
+            <ReadinessGauge value={readiness.score} />
+            {readiness.explanation && (
+              <p className="font-sans text-xs text-[#64748B] mt-3 text-center">{readiness.explanation}</p>
+            )}
           </Card>
 
           <Card className="p-5">
@@ -180,13 +239,28 @@ export default function Dashboard({ logs, srRecords }) {
             <div className="text-center">
               <div className="font-mono text-5xl font-bold text-[#0F2744]">{daysLeft}</div>
               <div className="font-sans text-sm text-[#64748B] mt-1">days remaining</div>
-              <div className="font-sans text-xs text-[#94A3B8] mt-2">August 17, 2026</div>
-              <ProgressBar
-                value={77 - daysLeft}
-                max={77 + (Math.max(0, daysLeft - 77))}
-                color={daysLeft < 30 ? '#EF4444' : '#0F2744'}
-                className="mt-3"
-              />
+              <div className="font-sans text-xs text-[#94A3B8] mt-2">{examDateDisplay}</div>
+            </div>
+          </Card>
+
+          {/* Readiness breakdown */}
+          <Card className="p-5">
+            <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-[#64748B] mb-3">Score Breakdown</h3>
+            <div className="flex flex-col gap-2">
+              {[
+                { label: 'Tasks',     value: readiness.taskScore,     max: 35, color: '#3B82F6' },
+                { label: 'SR',        value: readiness.srScore,       max: 25, color: '#8B5CF6' },
+                { label: 'Questions', value: readiness.questionScore, max: 25, color: '#10B981' },
+                { label: 'Mocks',     value: readiness.mockScore,     max: 15, color: '#F59E0B' },
+              ].map(({ label, value, max, color }) => (
+                <div key={label}>
+                  <div className="flex justify-between mb-0.5">
+                    <span className="font-sans text-xs text-[#64748B]">{label}</span>
+                    <span className="font-mono text-xs text-[#334155]">{value}/{max}</span>
+                  </div>
+                  <ProgressBar value={value} max={max} color={color} />
+                </div>
+              ))}
             </div>
           </Card>
         </div>

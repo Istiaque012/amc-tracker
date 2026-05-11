@@ -3,30 +3,38 @@ import Card from '../components/Common/Card';
 import SRSubjectCard from '../components/SR/SRSubjectCard';
 import SRModal from '../components/SR/SRModal';
 import SRDonut from '../components/Charts/SRDonut';
-import { SUBJECTS } from '../lib/constants';
 import { getSRDue } from '../lib/studyUtils';
-import { formatShort, addDaysToDate } from '../lib/dateUtils';
+import { formatShort } from '../lib/dateUtils';
 import { format, addDays, parseISO } from 'date-fns';
 
-export default function SRModule({ logs, srRecords, completeSRHit, createSRRecord }) {
+export default function SRModule({ logs, srRecords, completeSRHit, createSRRecord, subjects = [], settings = {} }) {
   const [srModal, setSrModal] = useState(null);
   const [saving, setSaving] = useState(false);
 
-  const completedTaskIds = new Set(logs.filter(l => l.status === 'complete').map(l => l.task_num));
-  const srDue = getSRDue(srRecords);
+  const completedTaskIds = new Set(
+    logs.filter(l => l.status === 'complete').map(l => l.task_id || String(l.task_num))
+  );
+  const srDue = getSRDue(srRecords, settings);
+  const sr1Interval = settings.sr1_interval || 7;
 
-  const completedSubjects = SUBJECTS.filter(s => completedTaskIds.has(s.milestoneTaskId));
+  const completedSubjects = subjects.filter(s => {
+    const mid = s.milestone_task_id;
+    return mid && (completedTaskIds.has(mid) || completedTaskIds.has(String(mid)));
+  });
 
   const enrichedRecords = completedSubjects.map(subject => {
     const existing = srRecords.find(r => r.subject_name === subject.name);
     if (existing) return existing;
     // Subject completed but no SR record yet — synthesize
-    const log = logs.find(l => l.task_num === subject.milestoneTaskId && l.status === 'complete');
+    const mid = subject.milestone_task_id;
+    const log = logs.find(l =>
+      (l.task_id === mid || String(l.task_num) === String(mid)) && l.status === 'complete'
+    );
     if (!log) return null;
     return {
       subject_name: subject.name,
       completed_date: log.date,
-      sr1_due: format(addDays(parseISO(log.date), 7), 'yyyy-MM-dd'),
+      sr1_due: format(addDays(parseISO(log.date), sr1Interval), 'yyyy-MM-dd'),
       sr1_done: false,
       sr2_due: null, sr2_done: false,
       sr3_due: null, sr3_done: false,
@@ -34,13 +42,13 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
   }).filter(Boolean);
 
   // Upcoming SRs in next 7 days
-  const today = new Date().toISOString().slice(0, 10);
+  const todayStr = new Date().toISOString().slice(0, 10);
   const in7 = format(addDays(new Date(), 7), 'yyyy-MM-dd');
   const upcoming = enrichedRecords.flatMap(rec =>
-    ['sr1','sr2','sr3'].flatMap(hit => {
+    ['sr1', 'sr2', 'sr3'].flatMap(hit => {
       const due = rec[`${hit}_due`];
       const done = rec[`${hit}_done`];
-      if (!due || done || due <= today || due > in7) return [];
+      if (!due || done || due <= todayStr || due > in7) return [];
       return [{ subject: rec.subject_name, hit, due }];
     })
   ).sort((a, b) => a.due.localeCompare(b.due));
@@ -50,13 +58,16 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
     setSaving(true);
     const existing = srRecords.find(r => r.subject_name === srModal.subjectName);
     if (!existing) {
-      const log = logs.find(l => l.status === 'complete' &&
-        SUBJECTS.find(s => s.name === srModal.subjectName)?.milestoneTaskId === l.task_num);
+      const subject = subjects.find(s => s.name === srModal.subjectName);
+      const mid = subject?.milestone_task_id;
+      const log = logs.find(l =>
+        (l.task_id === mid || String(l.task_num) === String(mid)) && l.status === 'complete'
+      );
       if (log) {
         await createSRRecord({
           subject_name: srModal.subjectName,
           completed_date: log.date,
-          sr1_due: format(addDays(parseISO(log.date), 7), 'yyyy-MM-dd'),
+          sr1_due: format(addDays(parseISO(log.date), sr1Interval), 'yyyy-MM-dd'),
         });
       }
     }
@@ -69,7 +80,9 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
     <div className="p-8">
       <div className="mb-6">
         <h1 className="font-serif text-3xl text-[#0F172A] mb-1">Spaced Repetition</h1>
-        <p className="font-sans text-[#64748B] text-sm">{completedSubjects.length} subjects completed · {srDue.length} due today</p>
+        <p className="font-sans text-[#64748B] text-sm">
+          {completedSubjects.length} subjects completed · {srDue.length} due today
+        </p>
       </div>
 
       <div className="grid gap-6" style={{ gridTemplateColumns: '2fr 1fr' }}>
@@ -80,12 +93,12 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
             <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-[#1D4ED8] mb-3">SR Protocol</h3>
             <div className="flex flex-col gap-1.5">
               {[
-                ['SR1 · Day 7', '15 min master sheet scan → 30 eMedici → analysis'],
-                ['SR2 · Day 21', '30 eMedici cold → wrong sections only'],
-                ['SR3 · Day 45', 'Starred items → 20 targeted eMedici'],
+                [`SR1 · Day ${sr1Interval}`, '15 min master sheet scan → 30 questions → analysis'],
+                [`SR2 · Day ${Math.round(sr1Interval * (settings.sr2_multiplier || 1.5) * 2)}`, '30 questions cold → wrong sections only'],
+                [`SR3 · Day ${Math.round(sr1Interval * (settings.sr2_multiplier || 1.5) * 2 * (settings.sr3_multiplier || 2.0))}`, 'Starred items → 20 targeted questions'],
               ].map(([label, desc]) => (
                 <div key={label} className="flex items-start gap-3">
-                  <span className="font-mono text-xs font-bold text-[#1D4ED8] mt-0.5 w-20 flex-shrink-0">{label}</span>
+                  <span className="font-mono text-xs font-bold text-[#1D4ED8] mt-0.5 w-24 flex-shrink-0">{label}</span>
                   <span className="font-sans text-sm text-[#334155]">{desc}</span>
                 </div>
               ))}
@@ -120,8 +133,10 @@ export default function SRModule({ logs, srRecords, completeSRHit, createSRRecor
               <h3 className="font-sans text-xs font-bold uppercase tracking-wider text-[#94A3B8] mb-3">Due Today</h3>
               <div className="flex flex-col gap-2">
                 {srDue.map(sr => (
-                  <div key={`${sr.subject_name}-${sr.hit}`}
-                    className="flex items-center justify-between py-1 border-b border-[#F1F5F9] last:border-0">
+                  <div
+                    key={`${sr.subject_name}-${sr.hit}`}
+                    className="flex items-center justify-between py-1 border-b border-[#F1F5F9] last:border-0"
+                  >
                     <span className="font-sans text-sm text-[#334155]">{sr.subject_name}</span>
                     <button
                       onClick={() => setSrModal({ subjectName: sr.subject_name, hit: sr.hit, hitLabel: sr.label })}
