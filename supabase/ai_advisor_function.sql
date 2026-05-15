@@ -194,9 +194,9 @@ BEGIN
       SELECT sr.subject_name,
              ROUND(100.0 * EXP(
                -(CURRENT_DATE - COALESCE(
-                   CASE WHEN sr.sr3_done THEN sr.sr3_due
-                        WHEN sr.sr2_done THEN sr.sr2_due
-                        WHEN sr.sr1_done THEN sr.sr1_due
+                   CASE WHEN sr.sr3_done THEN sr.sr3_due::date
+                        WHEN sr.sr2_done THEN sr.sr2_due::date
+                        WHEN sr.sr1_done THEN sr.sr1_due::date
                         ELSE sr.completed_date::date END,
                    sr.completed_date::date
                  ))::numeric
