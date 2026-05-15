@@ -89,7 +89,7 @@ export function getProjectedDates(logs, tasks, userSettings) {
     : [];
   const projected = {};
   sorted.forEach((task, index) => {
-    const rawDay = index + 1;
+    const rawDay = index;
     const extraRestDays = Math.floor(rawDay / effectiveDaysPerMonth);
     projected[task.id] = format(addDays(today, rawDay + extraRestDays), 'yyyy-MM-dd');
   });

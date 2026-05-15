@@ -3,6 +3,7 @@ import { Flame, BookOpen, CheckCircle, Zap, TrendingDown, Clock, Lightbulb } fro
 import Card from '../components/Common/Card';
 import Badge from '../components/Common/Badge';
 import Button from '../components/Common/Button';
+import AIAdvisor from '../components/AIAdvisor/AIAdvisor';
 import ProgressBar from '../components/Common/ProgressBar';
 import ReadinessGauge from '../components/Charts/ReadinessGauge';
 import PhaseRings from '../components/Charts/PhaseRings';
@@ -34,7 +35,7 @@ function MetricCard({ label, value, sub, color = '#3B82F6', icon: Icon, bg }) {
 export default function Dashboard({
   logs, srRecords,
   tasks = [], subjects = [], settings = {},
-  questionLogs = [], mockExams = [],
+  questionLogs = [], mockExams = [], userId,
 }) {
   const navigate = useNavigate();
   const todayStr = today();
@@ -212,6 +213,9 @@ export default function Dashboard({
               ))}
             </div>
           </Card>
+
+          {/* AI Study Advisor */}
+          <AIAdvisor userId={userId} />
         </div>
 
         {/* Right column */}

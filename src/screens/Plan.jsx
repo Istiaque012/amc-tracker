@@ -5,7 +5,7 @@ import Badge from '../components/Common/Badge';
 import Button from '../components/Common/Button';
 import Modal from '../components/Common/Modal';
 import { getProjectedDates } from '../lib/studyUtils';
-import { formatShort } from '../lib/dateUtils';
+import { formatShort, today as getToday } from '../lib/dateUtils';
 import { TASKS as FALLBACK_TASKS } from '../lib/constants';
 
 const FILTERS = ['All', 'Done', 'Upcoming', 'Phase 1', 'Phase 2', 'Phase 3'];
@@ -171,11 +171,14 @@ export default function Plan({ logs, upsertLog, deleteLog, tasks: rawTasks = [],
                         : isNext ? <Badge variant="blue">Next →</Badge>
                         : <Badge variant="gray">Pending</Badge>}
                     </td>
-                    <td className="px-4 py-3">
+                    <td className="px-4 py-3" style={{ minWidth: 110, whiteSpace: 'nowrap' }}>
                       {done && log ? (
-                        <span className="font-mono text-xs text-[#10B981]">{formatShort(log.date)}</span>
+                        <span className="font-mono text-xs" style={{ color: '#16A34A', fontWeight: 600 }}>{formatShort(log.date)}</span>
                       ) : projected[task.id] ? (
-                        <span className="font-mono text-xs text-[#CBD5E1]">~{formatShort(projected[task.id])}</span>
+                        <span className="font-mono text-xs" style={{
+                          color: projected[task.id] < getToday() ? '#DC2626' : '#374151',
+                          fontWeight: projected[task.id] < getToday() ? 600 : 500,
+                        }}>~{formatShort(projected[task.id])}</span>
                       ) : null}
                     </td>
                     <td className="px-4 py-3">

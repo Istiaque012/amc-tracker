@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { Plus, CheckSquare, Square } from 'lucide-react';
+import { Plus, CheckSquare, Square, GripVertical, Trash2, Copy, X } from 'lucide-react';
 import Card from '../components/Common/Card';
 import Badge from '../components/Common/Badge';
 import Button from '../components/Common/Button';
@@ -124,7 +124,7 @@ export default function Today({
       } else {
         await upsertLog({ date: todayStr, status: 'pending', task_num: taskNum, task_id: taskId, blocks: updated, e_medici: 0 });
       }
-    }, 1000);
+    }, 500);
   }
 
   function handleBlockToggle(idx) {
@@ -139,10 +139,108 @@ export default function Today({
     saveBlocksDebounced(updated);
   }
 
+  // ── Inline add form state ──
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newLabel, setNewLabel] = useState('');
+  const [newStart, setNewStart] = useState('');
+  const [newEnd, setNewEnd] = useState('');
+
+  // ── Editing state (which block field is being edited) ──
+  const [editingIdx, setEditingIdx] = useState(null); // index of block being edited
+  const [editField, setEditField] = useState(null); // 'label' | 'start' | 'end'
+  const [editValue, setEditValue] = useState('');
+
+  // ── Delete confirmation ──
+  const [deleteIdx, setDeleteIdx] = useState(null);
+
+  // ── Drag and drop state ──
+  const dragIdx = useRef(null);
+  const dragOverIdx = useRef(null);
+
   function addBlock() {
-    const updated = [...blocks, { label: `Block ${blocks.length + 1}`, time: 'Custom', done: false, note: '' }];
+    const label = newLabel.trim() || `Block ${blocks.length + 1}`;
+    const time = (newStart && newEnd) ? `${newStart}–${newEnd}` : 'Custom';
+    const updated = [...blocks, { label, time, done: false, note: '' }];
     setBlocks(updated);
-    if (todayLog) updateBlocks(todayStr, updated);
+    saveBlocksDebounced(updated);
+    setShowAddForm(false);
+    setNewLabel('');
+    setNewStart('');
+    setNewEnd('');
+  }
+
+  function deleteBlock(idx) {
+    const updated = blocks.filter((_, i) => i !== idx);
+    setBlocks(updated);
+    saveBlocksDebounced(updated);
+    setDeleteIdx(null);
+  }
+
+  function duplicateBlock(idx) {
+    const copy = { ...blocks[idx], done: false, note: '' };
+    const updated = [...blocks];
+    updated.splice(idx + 1, 0, copy);
+    setBlocks(updated);
+    saveBlocksDebounced(updated);
+  }
+
+  function startEdit(idx, field) {
+    setEditingIdx(idx);
+    setEditField(field);
+    if (field === 'label') {
+      setEditValue(blocks[idx].label);
+    } else {
+      // For start/end, parse from the time string "HH:MM–HH:MM"
+      const parts = (blocks[idx].time || '').split('–');
+      setEditValue(field === 'start' ? (parts[0] || '').trim() : (parts[1] || '').trim());
+    }
+  }
+
+  function commitEdit() {
+    if (editingIdx === null || editField === null) return;
+    const updated = blocks.map((b, i) => {
+      if (i !== editingIdx) return b;
+      if (editField === 'label') return { ...b, label: editValue.trim() || b.label };
+      // time edit
+      const parts = (b.time || '').split('–').map(s => s.trim());
+      if (editField === 'start') parts[0] = editValue || parts[0];
+      if (editField === 'end') parts[1] = editValue || parts[1];
+      return { ...b, time: parts.join('–') };
+    });
+    setBlocks(updated);
+    saveBlocksDebounced(updated);
+    setEditingIdx(null);
+    setEditField(null);
+    setEditValue('');
+  }
+
+  function cancelEdit() {
+    setEditingIdx(null);
+    setEditField(null);
+    setEditValue('');
+  }
+
+  // ── Drag handlers ──
+  function handleDragStart(idx) {
+    dragIdx.current = idx;
+  }
+
+  function handleDragOver(e, idx) {
+    e.preventDefault();
+    dragOverIdx.current = idx;
+  }
+
+  function handleDrop() {
+    const from = dragIdx.current;
+    const to = dragOverIdx.current;
+    if (from === null || to === null || from === to) { dragIdx.current = null; dragOverIdx.current = null; return; }
+    const updated = [...blocks];
+    const [dragged] = updated.splice(from, 1);
+    updated.splice(to, 0, dragged);
+    setBlocks(updated);
+    saveBlocksDebounced(updated);
+    dragIdx.current = null;
+    dragOverIdx.current = null;
   }
 
   const blocksDone = blocks.filter(b => b.done).length;
@@ -198,33 +296,174 @@ export default function Today({
             {blocks.map((block, i) => (
               <div
                 key={i}
-                className={`flex items-start gap-3 p-3 rounded-[10px] border transition-all ${
+                draggable
+                onDragStart={() => handleDragStart(i)}
+                onDragOver={(e) => handleDragOver(e, i)}
+                onDrop={handleDrop}
+                className={`flex items-start gap-2 p-3 rounded-[10px] border transition-all ${
                   block.done ? 'bg-[#ECFDF5] border-[#A7F3D0]' : 'bg-white border-[#E2E8F0]'
                 }`}
               >
+                {/* Drag handle */}
+                <div className="mt-0.5 cursor-grab active:cursor-grabbing text-[#CBD5E1] hover:text-[#94A3B8] flex-shrink-0">
+                  <GripVertical size={16} />
+                </div>
+
+                {/* Checkbox */}
                 <button onClick={() => handleBlockToggle(i)} className="mt-0.5 cursor-pointer text-[#64748B] hover:text-[#10B981] flex-shrink-0">
                   {block.done ? <CheckSquare size={18} className="text-[#10B981]" /> : <Square size={18} />}
                 </button>
+
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="font-sans text-sm font-semibold text-[#334155]">{block.label}</span>
-                    <span className="font-mono text-xs text-[#94A3B8]">{block.time}</span>
+                  <div className="flex items-center gap-2 mb-1 flex-wrap">
+                    {/* Editable label */}
+                    {editingIdx === i && editField === 'label' ? (
+                      <input
+                        autoFocus
+                        type="text"
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onBlur={commitEdit}
+                        onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                        className="font-sans text-sm font-semibold text-[#334155] border border-[#3B82F6] rounded-[6px] px-1.5 py-0.5 outline-none w-36"
+                      />
+                    ) : (
+                      <span
+                        onClick={() => startEdit(i, 'label')}
+                        className="font-sans text-sm font-semibold text-[#334155] cursor-pointer hover:bg-[#F1F5F9] rounded px-1 -mx-1"
+                        title="Click to edit label"
+                      >
+                        {block.label}
+                      </span>
+                    )}
+
+                    {/* Editable time (start–end) */}
+                    {editingIdx === i && (editField === 'start' || editField === 'end') ? (
+                      <input
+                        autoFocus
+                        type="time"
+                        value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        onBlur={commitEdit}
+                        onKeyDown={e => { if (e.key === 'Enter') commitEdit(); if (e.key === 'Escape') cancelEdit(); }}
+                        className="font-mono text-xs text-[#64748B] border border-[#3B82F6] rounded-[6px] px-1.5 py-0.5 outline-none"
+                      />
+                    ) : (
+                      <span className="flex items-center gap-0.5 font-mono text-xs text-[#94A3B8]">
+                        <span
+                          onClick={() => startEdit(i, 'start')}
+                          className="cursor-pointer hover:bg-[#F1F5F9] rounded px-0.5"
+                          title="Click to edit start time"
+                        >
+                          {(block.time || '').split('–')[0]?.trim() || '?'}
+                        </span>
+                        <span>–</span>
+                        <span
+                          onClick={() => startEdit(i, 'end')}
+                          className="cursor-pointer hover:bg-[#F1F5F9] rounded px-0.5"
+                          title="Click to edit end time"
+                        >
+                          {(block.time || '').split('–')[1]?.trim() || '?'}
+                        </span>
+                      </span>
+                    )}
                   </div>
                   <input
                     type="text"
-                    value={block.note}
+                    value={block.note || ''}
                     onChange={e => handleBlockNote(i, e.target.value)}
                     placeholder="What did you study?"
                     className="w-full font-sans text-sm text-[#64748B] bg-transparent outline-none placeholder-[#CBD5E1]"
                   />
                 </div>
+
+                {/* Action buttons */}
+                <div className="flex items-center gap-1 flex-shrink-0 mt-0.5">
+                  <button
+                    onClick={() => duplicateBlock(i)}
+                    className="p-1 rounded-[6px] text-[#94A3B8] hover:text-[#3B82F6] hover:bg-[#EFF6FF] cursor-pointer transition-colors"
+                    title="Duplicate block"
+                  >
+                    <Copy size={14} />
+                  </button>
+                  {deleteIdx === i ? (
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => deleteBlock(i)}
+                        className="px-1.5 py-0.5 rounded-[6px] bg-[#EF4444] text-white font-sans text-xs font-semibold cursor-pointer"
+                      >
+                        Delete
+                      </button>
+                      <button
+                        onClick={() => setDeleteIdx(null)}
+                        className="p-0.5 rounded-[6px] text-[#94A3B8] hover:text-[#334155] cursor-pointer"
+                      >
+                        <X size={14} />
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      onClick={() => setDeleteIdx(i)}
+                      className="p-1 rounded-[6px] text-[#94A3B8] hover:text-[#EF4444] hover:bg-[#FEF2F2] cursor-pointer transition-colors"
+                      title="Delete block"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
               </div>
             ))}
           </div>
 
-          <Button variant="secondary" onClick={addBlock} className="self-start">
-            <Plus size={16} /> Add Block
-          </Button>
+          {/* Inline add form */}
+          {showAddForm ? (
+            <div className="flex items-end gap-2 p-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-[10px]">
+              <div className="flex-1">
+                <label className="font-sans text-xs text-[#94A3B8] block mb-1">Label</label>
+                <input
+                  autoFocus
+                  type="text"
+                  value={newLabel}
+                  onChange={e => setNewLabel(e.target.value)}
+                  placeholder={`Block ${blocks.length + 1}`}
+                  onKeyDown={e => { if (e.key === 'Enter') addBlock(); if (e.key === 'Escape') setShowAddForm(false); }}
+                  className="w-full border border-[#E2E8F0] rounded-[8px] px-2.5 py-1.5 font-sans text-sm outline-none focus:border-[#3B82F6]"
+                />
+              </div>
+              <div>
+                <label className="font-sans text-xs text-[#94A3B8] block mb-1">Start</label>
+                <input
+                  type="time"
+                  value={newStart}
+                  onChange={e => setNewStart(e.target.value)}
+                  className="border border-[#E2E8F0] rounded-[8px] px-2 py-1.5 font-mono text-sm outline-none focus:border-[#3B82F6]"
+                />
+              </div>
+              <div>
+                <label className="font-sans text-xs text-[#94A3B8] block mb-1">End</label>
+                <input
+                  type="time"
+                  value={newEnd}
+                  onChange={e => setNewEnd(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter') addBlock(); }}
+                  className="border border-[#E2E8F0] rounded-[8px] px-2 py-1.5 font-mono text-sm outline-none focus:border-[#3B82F6]"
+                />
+              </div>
+              <Button onClick={addBlock} className="shrink-0">
+                <Plus size={14} /> Add
+              </Button>
+              <button
+                onClick={() => { setShowAddForm(false); setNewLabel(''); setNewStart(''); setNewEnd(''); }}
+                className="p-1.5 rounded-[8px] text-[#94A3B8] hover:text-[#334155] hover:bg-[#F1F5F9] cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            </div>
+          ) : (
+            <Button variant="secondary" onClick={() => setShowAddForm(true)} className="self-start">
+              <Plus size={16} /> Add Block
+            </Button>
+          )}
         </div>
 
         {/* Right — sticky sidebar */}

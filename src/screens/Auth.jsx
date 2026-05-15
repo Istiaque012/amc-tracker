@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from '../hooks/useAuth';
+import { ensureUserSetup } from '../lib/seedUserData';
 
 export default function Auth() {
   const { signIn, signUp } = useAuth();
@@ -14,13 +15,36 @@ export default function Auth() {
     e.preventDefault();
     setError(''); setMessage('');
     setLoading(true);
+
     if (mode === 'login') {
-      const { error } = await signIn(email, password);
-      if (error) setError(error.message);
+      const { data, error } = await signIn(email, password);
+      if (error) {
+        setError(error.message);
+      } else if (data?.user) {
+        // Login successful — seeding runs via App.jsx useEffect
+        console.log('[auth] Login successful, user:', data.user.id);
+      }
     } else {
-      const { error } = await signUp(email, password);
-      if (error) setError(error.message);
-      else setMessage('Check your email to confirm your account, then log in.');
+      const { data, error } = await signUp(email, password);
+      if (error) {
+        setError(error.message);
+      } else if (data?.session) {
+        // Auto-confirmed (email confirmation disabled) — user is logged in immediately
+        console.log('[auth] Signup auto-confirmed, seeding now for user:', data.user.id);
+        try {
+          await ensureUserSetup(data.user.id);
+          console.log('[auth] Seeding complete after signup');
+        } catch (err) {
+          console.error('[auth] Seeding failed after signup:', err);
+        }
+        // onAuthStateChange in useAuth will pick up the session and redirect
+      } else if (data?.user && !data?.session) {
+        // Email confirmation required — user must check email first
+        setMessage(
+          'Account created! Check your email for a confirmation link. ' +
+          'After confirming, come back and log in with your password.'
+        );
+      }
     }
     setLoading(false);
   }
@@ -43,7 +67,7 @@ export default function Auth() {
                   mode === m ? 'bg-[#0F2744] text-white' : 'text-[#64748B] hover:text-[#0F172A]'
                 }`}
               >
-                {m}
+                {m === 'login' ? 'Login' : 'Register'}
               </button>
             ))}
           </div>
@@ -60,7 +84,7 @@ export default function Auth() {
             <div>
               <label className="font-sans text-xs font-bold uppercase tracking-wider text-[#64748B] block mb-1.5">Password</label>
               <input
-                type="password" required value={password} onChange={e => setPassword(e.target.value)}
+                type="password" required minLength={6} value={password} onChange={e => setPassword(e.target.value)}
                 className="w-full border border-[#E2E8F0] rounded-[10px] px-3 py-2.5 font-sans text-sm text-[#0F172A] outline-none focus:border-[#3B82F6] focus:ring-2 focus:ring-[#BFDBFE] transition-all"
                 placeholder="••••••••"
               />

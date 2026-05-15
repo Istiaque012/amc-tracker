@@ -12,26 +12,30 @@ function log(msg) { console.log(`[seed] ${msg}`); }
 function err(step, error) { console.error(`[seed] FAILED at "${step}":`, error?.message || error); }
 
 export async function ensureUserSetup(userId) {
-  log('ensureUserSetup start');
+  log('ensureUserSetup start for user: ' + userId);
 
-  // 1. user_settings
   let subjectMap = {};
   let subjectRows = [];
   let taskMap = {};
   let taskRows = [];
   let phaseMap = {};
 
+  // Step 1: user_settings
+  log('Seeding step 1: user_settings...');
   try {
     const { data: existingSettings } = await supabase
       .from('user_settings').select('id').eq('user_id', userId).maybeSingle();
     if (!existingSettings) {
       const { error } = await supabase.from('user_settings').insert({ user_id: userId, ...DEFAULT_SETTINGS });
-      if (error) err('user_settings insert', error);
-      else log('user_settings inserted');
+      if (error) err('step 1 user_settings insert', error);
+      else log('Step 1 DONE: user_settings inserted');
+    } else {
+      log('Step 1 SKIP: user_settings already exist');
     }
-  } catch (e) { err('user_settings', e); }
+  } catch (e) { err('step 1 user_settings', e); }
 
-  // 2. phases
+  // Step 2: phases
+  log('Seeding step 2: phases...');
   try {
     const { data: existingPhases } = await supabase
       .from('phases').select('id, name, sort_order').eq('user_id', userId);
@@ -40,17 +44,19 @@ export async function ensureUserSetup(userId) {
         .from('phases')
         .insert(DEFAULT_PHASES.map(p => ({ user_id: userId, ...p })))
         .select('id, sort_order');
-      if (error) err('phases insert', error);
+      if (error) err('step 2 phases insert', error);
       else if (inserted) {
         inserted.forEach(p => { phaseMap[p.sort_order] = p.id; });
-        log(`phases inserted: ${inserted.length}`);
+        log(`Step 2 DONE: ${inserted.length} phases inserted`);
       }
     } else {
       existingPhases.forEach(p => { phaseMap[p.sort_order] = p.id; });
+      log('Step 2 SKIP: phases already exist');
     }
-  } catch (e) { err('phases', e); }
+  } catch (e) { err('step 2 phases', e); }
 
-  // 3. subjects
+  // Step 3: subjects
+  log('Seeding step 3: subjects...');
   try {
     const { data: existingSubjects } = await supabase
       .from('subjects').select('id, name').eq('user_id', userId);
@@ -59,19 +65,21 @@ export async function ensureUserSetup(userId) {
         .from('subjects')
         .insert(DEFAULT_SUBJECTS.map(s => ({ user_id: userId, ...s })))
         .select('id, name');
-      if (error) err('subjects insert', error);
+      if (error) err('step 3 subjects insert', error);
       else if (inserted) {
         subjectRows = inserted;
         inserted.forEach(s => { subjectMap[s.name] = s.id; });
-        log(`subjects inserted: ${inserted.length}`);
+        log(`Step 3 DONE: ${inserted.length} subjects inserted`);
       }
     } else {
       subjectRows = existingSubjects;
       existingSubjects.forEach(s => { subjectMap[s.name] = s.id; });
+      log('Step 3 SKIP: subjects already exist');
     }
-  } catch (e) { err('subjects', e); }
+  } catch (e) { err('step 3 subjects', e); }
 
-  // 4. tasks (batched 20)
+  // Step 4: tasks (batched 20)
+  log('Seeding step 4: tasks...');
   try {
     const { data: existingTasks } = await supabase
       .from('tasks').select('id, sort_order').eq('user_id', userId);
@@ -92,19 +100,21 @@ export async function ensureUserSetup(userId) {
       for (let i = 0; i < taskInserts.length; i += 20) {
         const { data: inserted, error } = await supabase
           .from('tasks').insert(taskInserts.slice(i, i + 20)).select('id, sort_order');
-        if (error) err(`tasks batch ${i}–${i + 20}`, error);
+        if (error) err(`step 4 tasks batch ${i}–${i + 20}`, error);
         else if (inserted) {
           taskRows.push(...inserted);
           inserted.forEach(t => { taskMap[t.sort_order] = t.id; });
         }
       }
-      log(`tasks inserted: ${taskRows.length}`);
+      log(`Step 4 DONE: ${taskRows.length} tasks inserted`);
     } else {
       existingTasks.forEach(t => { taskMap[t.sort_order] = t.id; });
+      log('Step 4 SKIP: tasks already exist');
     }
-  } catch (e) { err('tasks', e); }
+  } catch (e) { err('step 4 tasks', e); }
 
-  // 4b. Backfill subjects.milestone_task_id
+  // Step 5: backfill subjects.milestone_task_id
+  log('Seeding step 5: backfill milestone_task_id...');
   try {
     if (Object.keys(taskMap).length > 0 && Object.keys(subjectMap).length > 0) {
       const milestoneBySubject = {};
@@ -119,14 +129,15 @@ export async function ensureUserSetup(userId) {
             .update({ milestone_task_id: taskId })
             .eq('id', subjectId)
             .eq('user_id', userId);
-          if (error) err(`backfill milestone_task_id for ${subjectName}`, error);
+          if (error) err(`step 5 backfill milestone for ${subjectName}`, error);
         }
       }
-      log('backfill milestone_task_id done');
+      log('Step 5 DONE: milestone_task_id backfilled');
     }
-  } catch (e) { err('backfill milestone_task_id', e); }
+  } catch (e) { err('step 5 backfill milestone_task_id', e); }
 
-  // 5. schedule_templates + schedule_blocks (relational)
+  // Step 6: schedule_templates + schedule_blocks (relational)
+  log('Seeding step 6: schedule_templates + blocks...');
   let templateMap = {};
   try {
     const { data: existingTemplates } = await supabase
@@ -138,7 +149,7 @@ export async function ensureUserSetup(userId) {
           .insert({ user_id: userId, name: tpl.name, is_default: tpl.is_default })
           .select('id, name')
           .single();
-        if (error) { err(`schedule_templates insert "${tpl.name}"`, error); continue; }
+        if (error) { err(`step 6 schedule_templates insert "${tpl.name}"`, error); continue; }
         templateMap[tpl.name] = inserted.id;
         const blockRows = tpl.blocks.map((b, idx) => ({
           template_id: inserted.id,
@@ -149,15 +160,17 @@ export async function ensureUserSetup(userId) {
           sort_order: idx,
         }));
         const { error: blockError } = await supabase.from('schedule_blocks').insert(blockRows);
-        if (blockError) err(`schedule_blocks insert for "${tpl.name}"`, blockError);
+        if (blockError) err(`step 6 schedule_blocks for "${tpl.name}"`, blockError);
       }
-      log(`schedule_templates inserted: ${Object.keys(templateMap).length}`);
+      log(`Step 6 DONE: ${Object.keys(templateMap).length} templates + blocks inserted`);
     } else {
       existingTemplates.forEach(t => { templateMap[t.name] = t.id; });
+      log('Step 6 SKIP: templates already exist');
     }
-  } catch (e) { err('schedule_templates', e); }
+  } catch (e) { err('step 6 schedule_templates', e); }
 
-  // 6. schedule_template_assignments
+  // Step 7: schedule_template_assignments
+  log('Seeding step 7: schedule_template_assignments...');
   try {
     const { data: existingAssignments } = await supabase
       .from('schedule_template_assignments').select('id').eq('user_id', userId);
@@ -168,12 +181,15 @@ export async function ensureUserSetup(userId) {
         template_id: templateMap[tplName] || null,
       }));
       const { error } = await supabase.from('schedule_template_assignments').insert(assignments);
-      if (error) err('schedule_template_assignments insert', error);
-      else log('schedule_template_assignments inserted');
+      if (error) err('step 7 assignments insert', error);
+      else log('Step 7 DONE: assignments inserted');
+    } else {
+      log('Step 7 SKIP: assignments already exist');
     }
-  } catch (e) { err('schedule_template_assignments', e); }
+  } catch (e) { err('step 7 assignments', e); }
 
-  // 7. study_log seed — 2 pre-completed days
+  // Step 8: study_log seed — 2 pre-completed days
+  log('Seeding step 8: study_log seed...');
   try {
     const { data: existingLogs } = await supabase
       .from('study_log').select('date').eq('user_id', userId);
@@ -182,12 +198,15 @@ export async function ensureUserSetup(userId) {
         { user_id: userId, date: '2026-05-05', status: 'complete', task_num: 1, task_id: taskMap[1] || null, e_medici: 0, blocks: [] },
         { user_id: userId, date: '2026-05-06', status: 'complete', task_num: 2, task_id: taskMap[2] || null, e_medici: 0, blocks: [] },
       ]);
-      if (error) err('study_log seed', error);
-      else log('study_log seeded');
+      if (error) err('step 8 study_log seed', error);
+      else log('Step 8 DONE: 2 study_log entries seeded');
+    } else {
+      log('Step 8 SKIP: study_log already has entries');
     }
-  } catch (e) { err('study_log', e); }
+  } catch (e) { err('step 8 study_log', e); }
 
-  // 8. Endocrinology SR record
+  // Step 9: Endocrinology SR record
+  log('Seeding step 9: sr_records seed...');
   try {
     const { data: existingSR } = await supabase
       .from('sr_records').select('id').eq('user_id', userId).eq('subject_name', 'Endocrinology').maybeSingle();
@@ -201,12 +220,15 @@ export async function ensureUserSetup(userId) {
         sr1_done: false,
         max_hits: 3,
       });
-      if (error) err('sr_records seed', error);
-      else log('sr_records Endocrinology seeded');
+      if (error) err('step 9 sr_records seed', error);
+      else log('Step 9 DONE: Endocrinology SR record seeded');
+    } else {
+      log('Step 9 SKIP: Endocrinology SR record exists');
     }
-  } catch (e) { err('sr_records', e); }
+  } catch (e) { err('step 9 sr_records', e); }
 
-  // 9. Backfill task_id on existing study_log rows
+  // Step 10: Backfill task_id on study_log rows
+  log('Seeding step 10: backfill task_id on study_log...');
   try {
     if (Object.keys(taskMap).length > 0) {
       const { data: logsNeedingTaskId } = await supabase
@@ -216,14 +238,18 @@ export async function ensureUserSetup(userId) {
           const tid = taskMap[logRow.task_num];
           if (tid) {
             const { error } = await supabase.from('study_log').update({ task_id: tid }).eq('id', logRow.id);
-            if (error) err(`backfill task_id log ${logRow.id}`, error);
+            if (error) err(`step 10 backfill task_id log ${logRow.id}`, error);
           }
         }
+        log(`Step 10 DONE: backfilled ${logsNeedingTaskId.length} rows`);
+      } else {
+        log('Step 10 SKIP: no rows need task_id');
       }
     }
-  } catch (e) { err('backfill task_id', e); }
+  } catch (e) { err('step 10 backfill task_id', e); }
 
-  // 10. Backfill subject_id on existing sr_records
+  // Step 11: Backfill subject_id on sr_records
+  log('Seeding step 11: backfill subject_id on sr_records...');
   try {
     if (Object.keys(subjectMap).length > 0) {
       const { data: srNeedingSubjectId } = await supabase
@@ -233,14 +259,17 @@ export async function ensureUserSetup(userId) {
           const sid = subjectMap[rec.subject_name];
           if (sid) {
             const { error } = await supabase.from('sr_records').update({ subject_id: sid }).eq('id', rec.id);
-            if (error) err(`backfill subject_id sr ${rec.id}`, error);
+            if (error) err(`step 11 backfill subject_id sr ${rec.id}`, error);
           }
         }
+        log(`Step 11 DONE: backfilled ${srNeedingSubjectId.length} sr_records`);
+      } else {
+        log('Step 11 SKIP: no sr_records need subject_id');
       }
     }
-  } catch (e) { err('backfill subject_id', e); }
+  } catch (e) { err('step 11 backfill subject_id', e); }
 
-  log(`seeding complete — ${subjectRows.length} subjects, ${taskRows.length} tasks`);
+  log(`Seeding complete: ${subjectRows.length} subjects, ${taskRows.length} tasks inserted`);
   return { success: true };
 }
 

@@ -101,6 +101,7 @@ function AppInner() {
               settings={settings}
               questionLogs={questionLogs}
               mockExams={mockExams}
+              userId={user?.id}
             />
           } />
           <Route path="/today" element={
